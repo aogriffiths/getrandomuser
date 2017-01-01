@@ -25,7 +25,7 @@ $ getrandomuser -h
 
 Which returns:
 
-```bash
+```
 Usage: getprofiles [options]
 
   Options:
