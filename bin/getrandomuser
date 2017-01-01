@@ -1,0 +1,105 @@
+#!/usr/bin/env node
+const Promise = require('bluebird');
+const program = require('commander');
+const querystring = require('querystring');
+const https = require("https");
+const fs = require('fs');
+
+
+const APIURL = 'https://randomuser.me/api/';
+
+//Parser for '--results <n>' command line
+function parseResultsNumber(str){
+  res = parseInt(str);
+  return  (res > 0 && res <= 5000) ? res : NaN;
+}
+
+//Command line options
+program
+  .version(require('../package.json').version)
+  .usage('[options]')
+  .option('-r, --results <n>', 'number of users to fetch, max 5000', parseResultsNumber)
+  .option('-g, --gender <gender>', 'gender', /^(male|female)$/i)
+  .option('-n, --nat <nat>', 'nationality', /^(AU|BR|CA|CH|DE|DK|ES|FI|FR|GB|IE|IR|NL|NZ|TR|US)$/i)
+  .option('-p, --password <string>', 'control how passwords are generated')
+  .option('-s, --seed <string>', 'allows you to always generate the same set of users')
+  .option('-o, --output <file>', 'output to a file')
+  .option('-q, --quite', 'suppress outputting to stdout', false)
+  .option('-d, --dowloadimages', 'download images')
+;
+
+const PARAMS_TO_TAKE_FROM_COMMAND_LINE = ["results","gender","nat","password","seed"];
+
+//returns a promise to parse the command line and return the commander program when done.
+function parseCommandLine(){
+	return new Promise(function(resolve, reject){
+    program.parse(process.argv);
+		resolve(program); //program === commandline
+	});
+}
+
+//make the API query string from the parsed command line
+function makeAPIQuerystring(commandline){
+  return new Promise(function(resolve, reject){
+    const queryparams = {};
+    var errorObj = null;
+    PARAMS_TO_TAKE_FROM_COMMAND_LINE.forEach(function(param){
+      //commandline[param] === true when the param was specified but the value after it was not there or did not parse.
+      if(commandline.hasOwnProperty(param)){
+        if(commandline[param] === true){
+          //This is the first error, so create a new Error object.
+          if(errorObj === null){
+            errorObj = new Error();
+            errorObj.name = "OptionParseError";
+            errorObj.message = "Option parsing issue!";
+            errorObj.parseIssues = [];
+          };
+          errorObj.parseIssues.push("--" + param + " option was specified without a valid value.")
+        }else{
+          queryparams[param] = commandline[param];
+        }
+      }
+    });
+    if(errorObj !== null){
+      reject(errorObj);
+    }else{
+      resolve(querystring.stringify(queryparams));
+    }
+  });
+}
+
+//call the API withthe supplied querystring
+function callAPI(querystring){
+	return new Promise(function(resolve, reject){
+    var url = APIURL + (querystring ? '?' + querystring : '');
+    var request = https.get(url, function(response) {
+		    resolve(response);
+    }).on("error", reject);
+	});
+}
+
+function outputRespose(res){
+	return new Promise(function(resolve, reject){
+    var pipeTo = [];
+    if(!program.quite){
+      pipeTo.push(process.stdout);
+    }
+    if(program.hasOwnProperty('output') && program.output !== true){
+      var file = fs.createWriteStream(program.output);
+      file.on('error', reject);
+      pipeTo.push(file);
+    }
+    pipeTo.forEach(function(writeStream){
+        res.pipe(writeStream);
+    })
+    res.on('end', resolve);
+	});
+}
+
+parseCommandLine()
+  .then(makeAPIQuerystring)
+  .then(callAPI)
+  .then(outputRespose)
+  .then(function(res){
+    console.log(res);
+  })
